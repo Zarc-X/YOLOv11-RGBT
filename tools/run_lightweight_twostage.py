@@ -20,6 +20,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, required=True, help="Model yaml path")
     parser.add_argument("--data", type=str, default="ultralytics/cfg/datasets/GAIIC2024-rgbt.yaml")
     parser.add_argument("--initial-weights", type=str, default="", help="Optional initial .pt weights")
+    parser.add_argument(
+        "--resume-stage1-ckpt",
+        type=str,
+        default="",
+        help="Optional existing stage1 checkpoint (.pt). If set, skip stage1 training and start from stage2.",
+    )
 
     parser.add_argument("--project", type=str, default="runs/GAIIC2024_lightweight")
     parser.add_argument("--name", type=str, required=True)
@@ -141,6 +147,10 @@ def main() -> None:
     if initial_weights and not Path(initial_weights).exists():
         raise FileNotFoundError(f"Initial weights not found: {initial_weights}")
 
+    resume_stage1_ckpt = args.resume_stage1_ckpt.strip()
+    if resume_stage1_ckpt and not Path(resume_stage1_ckpt).exists():
+        raise FileNotFoundError(f"Resume stage1 checkpoint not found: {resume_stage1_ckpt}")
+
     common = dict(
         data=args.data,
         imgsz=args.imgsz,
@@ -149,7 +159,6 @@ def main() -> None:
         device=resolved_device,
         seed=args.seed,
         optimizer=args.optimizer,
-        lr0=args.lr0,
         lrf=args.lrf,
         cache=False,
         use_simotm=args.use_simotm,
@@ -165,6 +174,7 @@ def main() -> None:
 
     stage1_overrides = dict(
         epochs=args.stage1_epochs,
+        lr0=args.lr0,
         mosaic=args.stage1_mosaic,
         close_mosaic=max(0, args.stage1_close_mosaic),
         degrees=args.stage1_degrees,
@@ -196,13 +206,23 @@ def main() -> None:
         modal_shift_mode=args.modal_shift_mode,
     )
 
-    stage1_dir, stage1_ckpt = train_one_stage(
-        args.model,
-        stage1_name,
-        common,
-        stage1_overrides,
-        bootstrap_weights=initial_weights,
-    )
+    stage1_skipped = False
+    if resume_stage1_ckpt:
+        stage1_ckpt = Path(resume_stage1_ckpt)
+        if stage1_ckpt.parent.name == "weights":
+            stage1_dir = stage1_ckpt.parent.parent
+        else:
+            stage1_dir = stage1_ckpt.parent
+        stage1_skipped = True
+        print(f"[INFO] Skip stage1 training, use checkpoint: {stage1_ckpt}")
+    else:
+        stage1_dir, stage1_ckpt = train_one_stage(
+            args.model,
+            stage1_name,
+            common,
+            stage1_overrides,
+            bootstrap_weights=initial_weights,
+        )
 
     if args.stage2_epochs > 0:
         stage2_dir, stage2_ckpt = train_one_stage(str(stage1_ckpt), stage2_name, common, stage2_overrides)
@@ -220,6 +240,7 @@ def main() -> None:
             "run_dir": str(stage1_dir),
             "best_or_last": str(stage1_ckpt),
             "epochs": args.stage1_epochs,
+            "skipped": stage1_skipped,
             "settings": stage1_overrides,
         },
         "stage2": {

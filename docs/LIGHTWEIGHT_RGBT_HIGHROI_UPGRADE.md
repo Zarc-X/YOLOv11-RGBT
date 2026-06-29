@@ -232,6 +232,32 @@ PY
 MODE=status DEVICE=auto bash tools/run_lightweight_highroi_parallel.sh
 ```
 
+## 5.5 第一阶段已完成时的快速续跑（只跑 Stage2）
+
+如果第一阶段已经产出 `best.pt`，可以直接跳过 Stage1：
+
+```bash
+cd /root/autodl-tmp/YOLOv11-RGBT
+
+python tools/run_lightweight_twostage.py \
+  --model ultralytics/cfg/models/11-RGBT/yolo11-RGBT-midfusion-EFMv2-P2-P5NiN.yaml \
+  --data ultralytics/cfg/datasets/GAIIC2024-rgbt.yaml \
+  --project runs/GAIIC2024_lightweight_highroi/lightroi-20260629-105619 \
+  --name lw-efmv2p2p5nin \
+  --resume-stage1-ckpt runs/GAIIC2024_lightweight_highroi/lightroi-20260629-105619/lw-efmv2p2p5nin-s1/weights/best.pt \
+  --device auto \
+  --batch 8 \
+  --workers 2 \
+  --imgsz 768 \
+  --stage2-epochs 70
+```
+
+说明：
+
+1. `--resume-stage1-ckpt` 会跳过 Stage1，直接从该权重进入 Stage2。
+2. 你可以把 `--model` 替换为对应实验结构（AUX / DeepDBB）。
+3. 若使用已有运行目录，建议加 `--exist-ok`。
+
 ---
 
 ## 6. 为什么保留这些策略（而不是直接搬大模型）
