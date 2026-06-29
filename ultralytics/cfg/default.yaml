@@ -132,3 +132,6 @@ channels: 1 # (int) channels of model
 use_simotm: SimOTMBBS # (str) Pretreatment method
 brightness: 0.2 # (float) image brightness (probability)
 pairs_rgb_ir: ['visible','infrared']
+modal_shift: 0.0 # (float) probability of applying RGB/TIR modal shift for 4-channel RGBT training
+modal_shift_px: 8 # (int) max absolute pixel shift used by modal_shift augmentation
+modal_shift_mode: rgb # (str) modal shift mode: rgb | tir | independent

@@ -3653,6 +3653,69 @@ class RandomHSV4C:
         return labels
 
 
+class RandomModalShift4C:
+    """Randomly shifts RGB and/or TIR channels in 4-channel inputs to simulate modal misalignment."""
+
+    def __init__(self, p=0.0, max_shift_px=8, mode="rgb") -> None:
+        self.p = max(0.0, float(p))
+        self.max_shift_px = max(0, int(max_shift_px))
+        self.mode = str(mode).lower()
+
+    @staticmethod
+    def _shift_channel_group(channel_group, dx, dy, fill_value):
+        h, w = channel_group.shape[:2]
+        out = np.full_like(channel_group, fill_value)
+
+        src_x1 = max(0, -dx)
+        src_x2 = min(w, w - dx) if dx >= 0 else w
+        src_y1 = max(0, -dy)
+        src_y2 = min(h, h - dy) if dy >= 0 else h
+
+        dst_x1 = max(0, dx)
+        dst_x2 = dst_x1 + (src_x2 - src_x1)
+        dst_y1 = max(0, dy)
+        dst_y2 = dst_y1 + (src_y2 - src_y1)
+
+        if src_x2 > src_x1 and src_y2 > src_y1:
+            out[dst_y1:dst_y2, dst_x1:dst_x2] = channel_group[src_y1:src_y2, src_x1:src_x2]
+        return out
+
+    def _sample_shift(self):
+        if self.max_shift_px <= 0:
+            return 0, 0
+        dx = random.randint(-self.max_shift_px, self.max_shift_px)
+        dy = random.randint(-self.max_shift_px, self.max_shift_px)
+        return dx, dy
+
+    def __call__(self, labels):
+        if self.p <= 0 or random.random() >= self.p:
+            return labels
+
+        img = labels.get("img", None)
+        if img is None or img.ndim != 3 or img.shape[2] != 4:
+            return labels
+
+        rgb = img[:, :, :3]
+        tir = img[:, :, 3:4]
+
+        if self.mode in {"rgb", "visible"}:
+            dx, dy = self._sample_shift()
+            rgb = self._shift_channel_group(rgb, dx, dy, fill_value=114)
+        elif self.mode in {"tir", "ir", "infrared"}:
+            dx, dy = self._sample_shift()
+            tir = self._shift_channel_group(tir, dx, dy, fill_value=114)
+        elif self.mode in {"independent", "both"}:
+            dx_rgb, dy_rgb = self._sample_shift()
+            dx_tir, dy_tir = self._sample_shift()
+            rgb = self._shift_channel_group(rgb, dx_rgb, dy_rgb, fill_value=114)
+            tir = self._shift_channel_group(tir, dx_tir, dy_tir, fill_value=114)
+
+        img[:, :, :3] = rgb
+        img[:, :, 3:4] = tir
+        labels["img"] = img
+        return labels
+
+
 class RandomHSV6C:
 
     def __init__(self, hgain=0.5, sgain=0.5, vgain=0.5, brightness_range=(0.5, 1.5)) -> None:
@@ -3782,11 +3845,19 @@ def v8_transforms(dataset, imgsz, hyp,stretch=False):
     if  hyp.channels == 6:
         alb=Albumentations4C(p=1.0)
         random_hsv = RandomHSV6C(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v)
+
+    modal_shift = RandomModalShift4C(
+        p=float(getattr(hyp, "modal_shift", 0.0)),
+        max_shift_px=int(getattr(hyp, "modal_shift_px", 8)),
+        mode=getattr(hyp, "modal_shift_mode", "rgb"),
+    )
+
     return Compose([
         pre_transform,
         MixUp(dataset, pre_transform=pre_transform, p=hyp.mixup, dtype=dtype),
         alb,
         random_hsv,
+        modal_shift,
         RandomFlip(direction='vertical', p=hyp.flipud),
         RandomFlip(direction='horizontal', p=hyp.fliplr, flip_idx=flip_idx)])  # transforms
 
