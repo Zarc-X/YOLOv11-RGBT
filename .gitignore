@@ -1,3 +1,8 @@
+runs/
+*.pdf
+chat_exports/
+.github/
+
 # Byte-compiled / optimized / DLL files / EXE
 __pycache__/
 *.py[cod]

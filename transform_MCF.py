@@ -2,19 +2,51 @@ import torch
 import torch.nn as nn
 import re
 import datetime
+import argparse
+from pathlib import Path
+
+
+def load_model_from_checkpoint(model_path: Path, role: str) -> nn.Module:
+    """Load a model module from an Ultralytics checkpoint.
+
+    Depending on save path and trainer state, best.pt may store weights under
+    `model` or `ema`. This helper picks the first valid module.
+    """
+    checkpoint = torch.load(model_path, map_location="cpu")
+
+    if isinstance(checkpoint, nn.Module):
+        return checkpoint
+
+    if isinstance(checkpoint, dict):
+        model_obj = checkpoint.get("model", None)
+        ema_obj = checkpoint.get("ema", None)
+        chosen = model_obj if isinstance(model_obj, nn.Module) else ema_obj
+        if isinstance(chosen, nn.Module):
+            return chosen
+
+        keys = ", ".join(sorted(checkpoint.keys()))
+        raise ValueError(
+            f"{role} checkpoint has no valid nn.Module in 'model' or 'ema': {model_path}. "
+            f"Available keys: [{keys}]"
+        )
+
+    raise TypeError(f"Unsupported checkpoint type for {role}: {type(checkpoint)} from {model_path}")
 
 
 def copy_and_modify_layers(source_model_path, target_model_path, output_model_path):
-    # 加载源模型和目标模型
-    source_model = torch.load(source_model_path)
-    # 如果模型是一个字典，尝试提取模型部分
-    if isinstance(source_model, dict) and 'model' in source_model:
-        source_model = source_model['model']
+    source_model_path = Path(source_model_path)
+    target_model_path = Path(target_model_path)
+    output_model_path = Path(output_model_path)
 
-    target_model = torch.load(target_model_path)
-    # 如果模型是一个字典，尝试提取模型部分
-    if isinstance(target_model, dict) and 'model' in target_model:
-        target_model = target_model['model']
+    if not source_model_path.exists():
+        raise FileNotFoundError(f"Source model not found: {source_model_path}")
+    if not target_model_path.exists():
+        raise FileNotFoundError(f"Target model not found: {target_model_path}")
+    output_model_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 加载源模型和目标模型（兼容 model/ema 两种保存方式）
+    source_model = load_model_from_checkpoint(source_model_path, role="source")
+    target_model = load_model_from_checkpoint(target_model_path, role="target")
 
     # 定义复制的层范围
     copy_ranges = [
@@ -120,12 +152,33 @@ def copy_and_modify_layers(source_model_path, target_model_path, output_model_pa
     print(f"最终模型已成功保存到 {output_model_path}")
 
 
-# 使用示例           Usage Example
-# 如果需要更改模型结构，请仔细阅读本代码，重点修改20行和85行的网络结构层
-# If you need to modify the model structure, please carefully read this code and focus on modifying the network structure layers at line 20 and line 85.
+def parse_args():
+    parser = argparse.ArgumentParser(description="Convert Step1/Step2 weights into MCF initialization checkpoint")
+    parser.add_argument(
+        "--source-model-path",
+        type=str,
+        default="runs/GAIIC2024/GAIIC2024-yolo11x-RGB-main/weights/best.pt",
+        help="Step1 single-modal best.pt path",
+    )
+    parser.add_argument(
+        "--target-model-path",
+        type=str,
+        default="runs/GAIIC2024/GAIIC2024-yolo11x-RGBT-MCF-template/weights/best.pt",
+        help="Step2 MCF template best.pt path",
+    )
+    parser.add_argument(
+        "--output-model-path",
+        type=str,
+        default="runs/GAIIC2024/GAIIC2024-yolo11x-RGBT-MCF.pt",
+        help="Output converted MCF checkpoint path",
+    )
+    return parser.parse_args()
 
-copy_and_modify_layers(
-    source_model_path=r"E:\Download\RGBT_RESULT\M3FD\M3FD_IF-yolo11n-e300-16-pretrained\weights\best.pt",  # input: step 1
-    target_model_path=r"./runs/M3FD/M3FD-yolo11n-RGBT-midfusion-MCF-e300-16-/weights/best.pt", # input: step 2
-    output_model_path='M3FD-yolo11n-RGBT-midfusion-MCF.pt'  # output: step 3
-)
+
+if __name__ == '__main__':
+    args = parse_args()
+    copy_and_modify_layers(
+        source_model_path=args.source_model_path,
+        target_model_path=args.target_model_path,
+        output_model_path=args.output_model_path,
+    )

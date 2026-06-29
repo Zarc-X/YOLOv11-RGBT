@@ -1,0 +1,10 @@
+# GAIIC2024 RGBT dataset for YOLOv11-RGBT
+
+# You can also use absolute split paths directly.
+path: /root/autodl-tmp/GAIIC2024-赛道1-目标检测任务
+train: train/rgb
+val: val/rgb
+
+# Classes (COCO category ids 1..5 are remapped to 0..4 by converter)
+nc: 5
+names: ["car", "truck", "bus", "van", "freight_car"]
