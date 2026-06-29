@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import List
 
 from ultralytics import YOLO
 
@@ -26,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int, default=768)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--device", type=str, default="0")
+    parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--optimizer", type=str, default="SGD")
 
@@ -79,6 +80,41 @@ def pick_weight(run_dir: Path) -> Path:
     raise FileNotFoundError(f"No best.pt or last.pt found under {run_dir}")
 
 
+def resolve_device(requested: str) -> str:
+    import torch
+
+    req = str(requested).strip()
+    req_l = req.lower()
+
+    if req_l in {"", "auto"}:
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            return "0"
+        return "cpu"
+
+    if req_l == "cpu":
+        return "cpu"
+
+    if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+        raise RuntimeError(
+            "CUDA is unavailable in current environment while requesting GPU training. "
+            f"torch.__version__={torch.__version__}, torch.version.cuda={torch.version.cuda}, "
+            f"cuda_available={torch.cuda.is_available()}, cuda_count={torch.cuda.device_count()}. "
+            "Please check nvidia-smi and install CUDA-enabled torch in this conda env."
+        )
+
+    count = torch.cuda.device_count()
+    parts: List[str] = [p.strip() for p in req.split(",") if p.strip()]
+    if all(p.isdigit() for p in parts):
+        ids = [int(p) for p in parts]
+        bad = [i for i in ids if i < 0 or i >= count]
+        if bad:
+            if count == 1:
+                return "0"
+            raise ValueError(f"Invalid device '{req}'. Visible CUDA ids: 0..{count - 1}")
+
+    return req
+
+
 def train_one_stage(
     source: str,
     stage_name: str,
@@ -97,6 +133,9 @@ def train_one_stage(
 
 def main() -> None:
     args = parse_args()
+    resolved_device = resolve_device(args.device)
+    if resolved_device != args.device:
+        print(f"[WARN] device auto-corrected from '{args.device}' to '{resolved_device}'")
 
     initial_weights = args.initial_weights.strip()
     if initial_weights and not Path(initial_weights).exists():
@@ -107,7 +146,7 @@ def main() -> None:
         imgsz=args.imgsz,
         batch=args.batch,
         workers=args.workers,
-        device=args.device,
+        device=resolved_device,
         seed=args.seed,
         optimizer=args.optimizer,
         lr0=args.lr0,

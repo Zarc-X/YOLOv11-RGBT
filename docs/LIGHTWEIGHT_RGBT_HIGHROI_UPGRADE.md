@@ -154,7 +154,7 @@
 cd /root/autodl-tmp/YOLOv11-RGBT
 
 MODE=all \
-DEVICE=1 \
+DEVICE=auto \
 BATCH=8 \
 WORKERS=2 \
 RUN_ID=lightroi-$(date +%Y%m%d-%H%M%S) \
@@ -166,7 +166,8 @@ bash tools/run_lightweight_highroi_parallel.sh
 
 说明：
 
-- `DEVICE=1` 可替换为目标卡号。
+- `DEVICE=auto` 会自动选择可见 GPU 的 `0` 号设备；单卡时通常应使用 `0` 而不是 `1`。
+- 若你要显式指定设备，单卡建议 `DEVICE=0`。
 - `PARALLEL=0` 为单卡稳妥模式；如果你确认显存充足可设为 `1`。
 
 ## 5.2 单实验精跑（例如 AUX 版本）
@@ -179,7 +180,7 @@ python tools/run_lightweight_twostage.py \
   --data ultralytics/cfg/datasets/GAIIC2024-rgbt.yaml \
   --project runs/GAIIC2024_lightweight_manual \
   --name efmv2p2p5nin_aux_r1 \
-  --device 1 \
+  --device auto \
   --batch 8 \
   --workers 2 \
   --imgsz 768 \
@@ -198,10 +199,37 @@ MODEL2_WEIGHTS=runs/GAIIC2024_lightweight_highroi/<RUN_ID>/lw-efmv2p2p5nin-aux-s
 MODEL2_IMGSZ=768 \
 MODEL3_WEIGHTS=runs/GAIIC2024_lightweight_highroi/<RUN_ID>/lw-deepdbb-s2/weights/best.pt \
 MODEL3_IMGSZ=896 \
-DEVICE=1 \
+DEVICE=auto \
 BATCH=8 \
 EXPORT_TTA=1 \
 bash tools/run_lightweight_submit_chain.sh
+```
+
+## 5.4 若提示 CUDA 不可用（H800 常见）
+
+先在目标 conda 环境里做快速自检：
+
+```bash
+nvidia-smi
+python - <<'PY'
+import torch
+print('torch', torch.__version__)
+print('torch.version.cuda', torch.version.cuda)
+print('cuda_available', torch.cuda.is_available())
+print('cuda_count', torch.cuda.device_count())
+PY
+```
+
+如果 `cuda_available=False`：
+
+1. 确认当前容器是否已挂载 GPU（`nvidia-smi` 应能看到 H800）。
+2. 确认当前 conda 环境安装的是 CUDA 版 PyTorch，而不是 CPU 版。
+3. 单卡场景设备号通常是 `0`；脚本已支持 `DEVICE=auto` 自动纠偏。
+
+你也可以先用脚本内置预检：
+
+```bash
+MODE=status DEVICE=auto bash tools/run_lightweight_highroi_parallel.sh
 ```
 
 ---

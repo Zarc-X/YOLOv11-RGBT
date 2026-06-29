@@ -13,10 +13,11 @@ BASE_PROJECT="${BASE_PROJECT:-runs/GAIIC2024_lightweight_highroi}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 
 DATA="${DATA:-ultralytics/cfg/datasets/GAIIC2024-rgbt.yaml}"
-DEVICE="${DEVICE:-0}"
+DEVICE="${DEVICE:-auto}"
 BATCH="${BATCH:-8}"
 WORKERS="${WORKERS:-2}"
 SEED="${SEED:-42}"
+ALLOW_CPU="${ALLOW_CPU:-0}"
 
 # Optional transfer initialization for all experiments.
 INIT_WEIGHTS="${INIT_WEIGHTS:-}"
@@ -33,6 +34,75 @@ S1_MOSAIC="${S1_MOSAIC:-1.0}"
 S2_MOSAIC="${S2_MOSAIC:-0.15}"
 S1_MODAL_SHIFT="${S1_MODAL_SHIFT:-0.25}"
 S2_MODAL_SHIFT="${S2_MODAL_SHIFT:-0.10}"
+
+resolve_device_or_exit() {
+  local requested="$1"
+  local allow_cpu="$2"
+
+  python - "$requested" "$allow_cpu" <<'PY'
+import sys
+
+req = sys.argv[1].strip()
+allow_cpu = sys.argv[2].strip() == "1"
+
+try:
+  import torch
+except Exception as e:
+  print(f"[ERROR] Failed to import torch: {e}", file=sys.stderr)
+  sys.exit(11)
+
+req_l = req.lower()
+
+def cuda_diag() -> str:
+  return (
+    f"torch.__version__={torch.__version__}, "
+    f"torch.version.cuda={torch.version.cuda}, "
+    f"cuda_available={torch.cuda.is_available()}, "
+    f"cuda_count={torch.cuda.device_count()}"
+  )
+
+if req_l == "cpu":
+  print("cpu")
+  sys.exit(0)
+
+if req_l in {"", "auto"}:
+  if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+    print("0")
+    sys.exit(0)
+  if allow_cpu:
+    print("cpu")
+    sys.exit(0)
+  print("[ERROR] CUDA is unavailable and DEVICE is auto/empty.", file=sys.stderr)
+  print(f"[ERROR] {cuda_diag()}", file=sys.stderr)
+  print("[HINT] Use DEVICE=cpu only for debug, or fix CUDA runtime first.", file=sys.stderr)
+  sys.exit(12)
+
+# Non-CPU explicit device path.
+if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+  print(f"[ERROR] CUDA is unavailable for requested DEVICE={req}", file=sys.stderr)
+  print(f"[ERROR] {cuda_diag()}", file=sys.stderr)
+  print("[HINT] Check `nvidia-smi` and reinstall CUDA-enabled torch in this conda env.", file=sys.stderr)
+  sys.exit(13)
+
+count = torch.cuda.device_count()
+parts = [p.strip() for p in req.split(",") if p.strip()]
+
+if all(p.isdigit() for p in parts):
+  ids = [int(p) for p in parts]
+  bad = [i for i in ids if i < 0 or i >= count]
+  if bad:
+    if count == 1:
+      print("0")
+      sys.exit(0)
+    print(
+      f"[ERROR] Invalid DEVICE={req}. Visible CUDA ids: 0..{count-1}",
+      file=sys.stderr,
+    )
+    sys.exit(14)
+
+print(req)
+PY
+}
 
 cd "$PROJECT_ROOT"
 
@@ -51,6 +121,13 @@ if [[ "$MODE" == "status" ]]; then
   done
   exit 0
 fi
+
+REQUESTED_DEVICE="$DEVICE"
+DEVICE="$(resolve_device_or_exit "$DEVICE" "$ALLOW_CPU")"
+if [[ "$REQUESTED_DEVICE" != "$DEVICE" ]]; then
+  echo "[WARN] DEVICE auto-corrected from '$REQUESTED_DEVICE' to '$DEVICE'"
+fi
+echo "[INFO] DEVICE=$DEVICE"
 
 if [[ "$MODE" != "all" ]]; then
   echo "[ERROR] Unsupported MODE=$MODE. Use all|status" >&2
